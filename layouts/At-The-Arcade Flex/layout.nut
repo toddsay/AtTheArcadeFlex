@@ -1,6 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
-/* At-The-Arcade Flex layout for Attract-Mode
-V1.0
+/*
+At-The-Arcade Flex layout for Attract-Mode
+V1.1
   ______    __            ________ __                        ______                                   __               ________ __                   
  /      \  |  \          |        \  \                      /      \                                 |  \             |        \  \                  
 |  ▓▓▓▓▓▓\_| ▓▓_          \▓▓▓▓▓▓▓▓ ▓▓____   ______        |  ▓▓▓▓▓▓\ ______   _______  ______   ____| ▓▓ ______      | ▓▓▓▓▓▓▓▓ ▓▓ ______  __    __ 
@@ -20,8 +21,15 @@ Cabs edited by damonxxx and Yaron2019 http://forum.attractmode.org/index.php?top
 Game bezels by The Bezel Project https://github.com/thebezelproject/bezelproject-MAME
 CRT screen glow shader by zpaolo11x
 Letters and 'System games count' code adapted from pcca theme 
-CD Player code by Sony */
-////////////////////////////////////////////////////////////////////////////////////////////////////////   
+CD Player code by Sony 
+
+Change log:
+-----------
+1.0 Initial release
+1.1 Fix potential crashes, auto-rotate horizontal snap videos for non-FX3 pinball (sideways snaps are common for FP/VP)
+
+*/
+/////////////////////////////////////////////////////////////////////////////////////////////////////
 
 local orderx = 0;
 local divider = "----"
@@ -264,13 +272,13 @@ local cabinet_settings = {
 			cab_y_offset_pct = 0, // percentage of image to shift downward
 		},
 		snap = {
+			autorotate = false,
 			snap_x = 200,
 			snap_y = 318,
 			snap_w = 706,
 			snap_h = 526,
 			snap_pinch_x = 0,
 			snap_on_top = false, // render snap over cabinet? (zorder)
-			snap_vertical = false,
 		},
 		bezel = {
 			bezel_sep_w = 580, // 810, // width to render bezel with separators
@@ -306,13 +314,13 @@ local cabinet_settings = {
 			cab_y_offset_pct = 16,
 		},
 		snap = {
+			autorotate = true,
 			snap_x = 94,
 			snap_y = 326,
 			snap_w = 210,
 			snap_h = 210,
 			snap_pinch_x = -50,
 			snap_on_top = true,
-			snap_vertical = true,
 		},
 		marquee = {
 			marquee_x = 50,
@@ -466,7 +474,7 @@ else
 
 if( my_config["enable_ambience"] == "Music" && my_config["enable_song_title"] == "Yes" )
 {
-	function cleanSongTitle( ioffset )
+	cleanSongTitle <- function( ioffset )
 	{
 		local name = list[song_num];
 		if( name.len() > 0 ) 
@@ -503,7 +511,7 @@ if( my_config["enable_ambience"] == "Music" && my_config["enable_song_title"] ==
 	local title_out_transition = { property = "y", start = fly*0.0, end = fly*-1.2, delay = my_config["song_title_time"].tofloat(), time = title_anim_speed }
 
 	fe.add_signal_handler( this, "showSongTitle" )
-	function showSongTitle( str ) 
+	showSongTitle <- function( str ) 
 	{
 		if( title_visibile == true && !first_song )
 		{
@@ -542,7 +550,7 @@ if( my_config["enable_ambience"] != "No" )
 		if( list.len() > 0 )
 		{
 			if( my_config["music_play_method"] == "Shuffle" )
-				song_num = floor(((rand() % 1000 ) / 1000.0) * (list.len() - 1));
+				song_num = floor(((rand() % 1000 ) / 1000.0) * list.len());
 
 			music_file = music_path + list[song_num];
 		}
@@ -583,7 +591,7 @@ function music_tick( ttime )
 				}
 				
 				if( my_config["music_play_method"] == "Shuffle" )
-					song_num = floor(((rand() % 1000 ) / 1000.0) * (list.len() - 1));
+					song_num = floor(((rand() % 1000 ) / 1000.0) * list.len());
 				
 				sound.file_name = music_path + list[song_num];
 				sound.playing = true;
@@ -603,7 +611,7 @@ function musicSelection( selection="" )
 	if( first_song == false )
 	{
 		if( my_config["music_play_method"] == "Shuffle" )  
-			song_num = floor(((rand() % 1000 ) / 1000.0) * (list.len() - 1));
+			song_num = floor(((rand() % 1000 ) / 1000.0) * list.len());
 			
 		if( selection == "next" ) 
 		{
@@ -798,6 +806,9 @@ local snap_x = CabSetting("snap", "snap_x");
 local snap_y = CabSetting("snap", "snap_y");
 local snap_pinch_x = CabSetting("snap", "snap_pinch_x");
 
+// Check if autorotate enabled for cab type, but disable for fx3 snaps which are vertical landscape
+local snap_autorotate = CabSetting("snap", "autorotate") && fe.list.name.tolower().find("fx3") == null;
+
 // Black background when no snap is available
 local snapbg_srf = main_srf.add_surface( snap_w, snap_h );
 snapbg_srf.set_pos( snap_x, snap_y );
@@ -861,6 +872,39 @@ if (preserve_snap_aspect)
 if ( my_config["mute_videos"] == "Yes" )
 	snap.video_flags = Vid.NoAudio;
 
+// Support for auto snap rotation to handle horizontal pinball snaps
+if (snap_autorotate)
+{
+	fe.add_transition_callback("snap_transitions");
+	snap_transitions <- function( ttype, var, ttime ) {
+		switch (ttype)
+		{
+			case Transition.ToNewList:	
+			case Transition.EndNavigation:
+				if (snap.texture_width > snap.texture_height)  // landscape snapshot/video
+				{
+					snap_surface.rotation = 270;
+					snap_surface.pinch_x = 0;
+					snap_surface.pinch_y = 0 - snap_pinch_x;
+					snap_surface.width = snap_h;
+					snap_surface.height = snap_w - (snap_pinch_x * 2);
+					snap_surface.set_pos(snap_x + snap_pinch_x, snap_y + snap_h);
+				}
+				else // Normal portrait orientation snapshot/video
+				{
+					snap_surface.rotation = 0;
+					snap_surface.pinch_x = snap_pinch_x;
+					snap_surface.pinch_y = 0;
+					snap_surface.width = snap_w;
+					snap_surface.height = snap_h;
+					snap_surface.set_pos(snap_x, snap_y);
+				}
+			break;
+		}
+		return false;
+	}
+}
+
 // snap shader effects
 local using_snap_shader = my_config["enable_snap_shader"] != "No" 
 	&& ShadersAvailable == 1 
@@ -903,13 +947,13 @@ if (using_snap_shader)
 		snap.shader = shader_lottes;
 		
 		fe.add_transition_callback( "shader_transitions" );
-		function shader_transitions( ttype, var, ttime ) {
+		shader_transitions <- function( ttype, var, ttime ) {
 			switch( ttype )
 			{
 				case Transition.ToNewList:	
 				case Transition.EndNavigation:
-					snap.width = snap_surface.subimg_width;
-					snap.height = snap_surface.subimg_height;
+					// snap.width = snap_surface.subimg_width;
+					// snap.height = snap_surface.subimg_height;
 					// Play with these settings to get a good final image
 					snap.shader.set_param("color_texture_sz", snap_surface.width, snap_surface.height);
 					snap.shader.set_param("color_texture_pow2_sz", snap_surface.width, snap_surface.height);
@@ -939,7 +983,7 @@ if (using_scanlines)
 	else if( my_config["enable_crt_scanline"] == "Dark" )
 		crt_scanlines.alpha = 200;
 
-	function scanlines_transitions(ttype, var, ttime) 
+	scanlines_transitions <- function(ttype, var, ttime) 
 	{
 		switch (ttype) 
 		{
@@ -961,9 +1005,9 @@ if (using_scanlines)
 
 if (using_bezels)
 {
-	function bezel_transitions(ttype, var, ttime) 
+	bezel_transitions <- function(ttype, var, ttime) 
 	{
-		switch (ttype) 
+		switch (ttype)
 		{
 			case Transition.ToNewList:	
 			case Transition.EndNavigation:
@@ -1339,7 +1383,7 @@ if( my_config["wheel_fadeout"] != "No" )
 
 	if( wheel_fade_ms > 0 )
 	{
-		function wheel_fade_transition( ttype, var, ttime )
+		wheel_fade_transition <- function( ttype, var, ttime )
 		{
 			if( ttype == Transition.ToNewSelection || ttype == Transition.ToNewList )
 			{
@@ -1367,7 +1411,7 @@ if( my_config["wheel_fadeout"] != "No" )
 		}
 		fe.add_transition_callback( "wheel_fade_transition" );
 		
-		function wheel_alpha( ttime )
+		wheel_alpha <- function( ttime )
 		{
 			local _elapsed = 0;
 			
@@ -1499,7 +1543,7 @@ if( my_config["wheel_pulse"] != "No" )
 	animation.add( PropertyAnimation( art_pulse, art_scale ) );
 	animation.add( PropertyAnimation( art_pulse, alpha_cfg ) );
 
-	function pulse_transition( ttype, var, ttime )
+	pulse_transition <- function( ttype, var, ttime )
 	{
 		if( ttype == Transition.ToNewSelection )
 		{
@@ -1521,7 +1565,7 @@ if( my_config["wheel_pulse"] != "No" )
 	animation.add( PropertyAnimation( art_pulse, art_scale2 ) );
 	animation.add( PropertyAnimation( art_pulse, alpha_cfg2 ) );
 		
-	function stop_pulse( ttime )
+	stop_pulse <- function( ttime )
 	{
 		// if there is fadeout, pulse once only
 		if( conveyor.m_objs[wheel_count/2].m_obj.alpha == 0 || conveyor.m_objs[wheel_count/2].m_obj.alpha == _partially )
@@ -1612,7 +1656,7 @@ if( my_config["enable_gcartart"] == "Yes" && my_config["wheel_fadeout"] != "No" 
 	local start_transition1 = { when = Transition.StartLayout, property = "x", start = flx*2, end = flx*x, time = my_delay+600 }
 	animation.add( PropertyAnimation( flyer, start_transition1 ) );
 
-	function art_transition_flyer( ttype, var, ttime )
+	art_transition_flyer <- function( ttype, var, ttime )
 	{
 		if( ttype == Transition.EndNavigation )
 			flyer.alpha = 255;
@@ -1684,7 +1728,7 @@ if( my_config["enable_gboxart"] == "Yes" )
 	local move_transition2 = { when = Transition.EndNavigation, property = "y", start = y_start, end = y_end, time = my_delay+200 }
 	animation.add( PropertyAnimation( boxart, move_transition2 ) );		
 
-	function art_transition( ttype, var, ttime )
+	art_transition <- function( ttype, var, ttime )
 	{
 		if( ttype == Transition.EndNavigation )
 			boxart.alpha = 255;
@@ -1873,7 +1917,7 @@ if( my_config["enable_gameinfo"] != "No" )
 		title = fe.add_text( "[Title]", x_title, title_line_y, flw, line_h );
 	else
 	{
-		function formatted_text()
+		formatted_text <- function()
 		{
 			local m = Manufacturer_Name(0);
 			local t = "[Title]";
@@ -1915,7 +1959,7 @@ if( my_config["enable_gameinfo"] != "No" )
 	// random color for info text
 	if( my_config["enable_colors"] == "Yes" )
 	{
-		function brightrand() {
+		brightrand <- function() {
 			return 255-(rand()/255);
 		}
 
@@ -1923,7 +1967,7 @@ if( my_config["enable_gameinfo"] != "No" )
 		
 		// Color Transitions
 		fe.add_transition_callback( "color_transitions" );
-		function color_transitions( ttype, var, ttime ) {
+		color_transitions <- function( ttype, var, ttime ) {
 			switch( ttype )
 			{
 				case Transition.StartLayout:
